@@ -8,5 +8,3 @@ Codes a bit messy but alright.
 Feel free to do what ever you want with this code.
 
 Rename config.example.cfg to config.cfg
-
-Will be adding multiple server support soon.
