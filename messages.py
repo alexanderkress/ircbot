@@ -29,7 +29,7 @@ class Message:
     MSG_ERROR_TEAMNAME              =   "%s cannot be used as team parameter. Try red or blue."
     MSG_ERROR_BOTTYPE               =   "%s is an invalid bot type. Try http://urt.so/?/188 for help"
     MSG_ERROR_BOOLNUMERIC           =   "%s is either not a numeric value, or neither 0 nor 1."
-    MSG_ERROR_NOTESTSESSION         =   "There is no test session started. Use !test <num> to start a test session."
+    MSG_ERROR_NOTESTSESSION         =   "There is no test session started. Use !test <servnum> <num> to start a test session."
     MSG_ERROR_NOTJOINEDTESTSESSION  =   "%s you haven't joined the test session, can't remove. !add to join."
     MSG_ERROR_ALREADYINTESTSESSION  =   "%s you're already in the current test session!"
     

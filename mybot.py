@@ -18,6 +18,15 @@
 # Liquid <liq@liq-urt.de>
 #
 
+
+'''
+ - ToDo: 
+    - Replace "if int(...)" with "str.isdigit()" since 
+        int("0") returns False -> causes some issues.
+    - Add multiple server support for all commands
+    - ... 
+'''
+
 import irclib
 import sys
 import config
@@ -37,12 +46,14 @@ class MyBot(irclib.SimpleIRCClient):
         self.targetpass = targetpass    ## password of the channel if there's one
         self.rcon = rcon                ## rcon-"connection" to the urt-server
         self.cfg = cfg                  ## bot's config
+        self.servernum = len(self.cfg.gameserverIP)-1 
         self.m = Message()              ## bot's messages
         self.admins = {}                ## for the bot's admin/mod login
         self.chanadmins = {}            ## saving oped / voiced status of people in channel
         self.channel = []               ## channels the bot has joined
         self.player = {}                ## saving players connected to the urt-server
         self.maxplayercount = 0
+        self.testserver = 0
         self.playerjoined = []
         self.channel.append(self.target)
     
@@ -54,8 +65,9 @@ class MyBot(irclib.SimpleIRCClient):
         if irclib.is_channel(self.target):
             print "*** Joining channel %s" %self.target
             connection.join(self.target, self.targetpass)
-            self.connection.privmsg_many(self.target, "[%s] v%s" % (self.cfg.ircNick, VERSION)) 
-            #self.rcon.send("say \"[%s] v%s\"" % (self.cfg.ircNick, VERSION))
+            self.connection.privmsg(self.target, "[%s] v%s" % (self.cfg.ircNick, VERSION)) 
+            for server in self.rcon:
+                server.send("say \"[%s] v%s\"" % (self.cfg.ircNick, VERSION))
     
     '''
     Kills the program after disconnecting form the IRC-Server
@@ -105,33 +117,33 @@ class MyBot(irclib.SimpleIRCClient):
         - Makes the bot part a channel it's in. Can't part the main channel
     - !help
         - Displays a link to the help page on urt.info
-    - !test <num>
+    - !test <servnum> <num>
         - Starts a test session with num-players
     - !add
         - Makes a player join a test session
     - !remove
         - Removes the player from the active test session, if joined.
-    - !rcon <params>
+    - !rcon <servnum> <params>
         - Sends a direct rcon command to the urt-server
-    - !playerlist
+    - !playerlist <servnum>
         - Displays all current connected players to the urt-server
-    - !status
+    - !status <servnum>
         - Displays general urt-server information like version, etc.
-    - !map <mapname>
+    - !map <servnum> <mapname>
         - Changes the map on the urt-server
-    - !mode <gametype>
+    - !mode <servnum> <gametype>
         - Changes the gametype on the urt-server and reloads it afterwards
-    - !kick <player/id>
+    - !kick <servnum> <player/id>
         - Kicks a player off the urt-server
-    - !restart
+    - !restart <servnum>
         - Restarts the map on the urt-server
-    - !reload
+    - !reload <servnum>
         - Reloads the map on the urt-server
-    - !restartserv
+    - !restartserv <servnum>
         - Sends the rcon-command quit to the urt-server -> Bash script restarts it
-    - !botenable <1/0>
+    - !botenable <servnum> <1/0>
         - Enables or disables bots on the urt-server and reloads it afterwards
-    - !botadd <bottype> <skill level> <team> <join delay> <botname>
+    - !botadd <servnum> <bottype> <skill level> <team> <join delay> <botname>
         - Adds a bot on the urt-server
     '''
     def on_pubmsg(self, connection, event):
@@ -160,6 +172,11 @@ class MyBot(irclib.SimpleIRCClient):
                     self.chanadmins[message[0]] = 'None'
         
         ### BOT COMMANDS
+        if message[0] == 'hello' and message[1] == self.cfg.ircNick:
+            try:
+                self.connection.privmsg(self.target, ("hello " + nick + ", how are you doing?"))
+            except:
+                self.connection(self.target, self.m.MSG_ERROR_GENERAL)
         if message[0] == '!die':
             try:
                 if self.chanadmins[nick] == '@' or self.admins[event.source()] == 'admin':
@@ -221,15 +238,22 @@ class MyBot(irclib.SimpleIRCClient):
         ### OTHER COMMANDS
         elif message[0] == '!help':
             try:
-                self.connection.privmsg_many(self.target, self.m.MSG_BOT_HELP)
+                self.connection.privmsg(self.target, self.m.MSG_BOT_HELP)
             except:
-                self.connection.privmsg_many(self.channel, self.m.MSG_ERROR_GENERAL)
-        elif message[0] == '!test' and len(message) >1:
+                self.connection.privmsg(self.channel, self.m.MSG_ERROR_GENERAL)
+        ###
+        elif message[0] == '!test' and len(message) >2:
             try:
-                if int(message[1]):
+                if message[1].isdigit():
                     try:
-                        self.maxplayercount = int(message[1])
-                        self.connection.privmsg(self.target, self.m.MSG_BOT_INITTESTSESSION % (nick, message[1]))
+                        if message[2].isdigit():
+                            servnum = int(message[2])
+                            if (0 <= servnum <= self.servernum):
+                                self.maxplayercount = int(message[1])
+                                self.testserver = servnum
+                                self.connection.privmsg(self.target, self.m.MSG_BOT_INITTESTSESSION % (nick, message[1]))
+                            else:
+                                self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
                     except ValueError:
                         self.connection.privmsg(self.target, "Parameter needs to be a numeric value.")
                     except:
@@ -247,18 +271,23 @@ class MyBot(irclib.SimpleIRCClient):
                                 if len(self.playerjoined) == self.maxplayercount:
                                     try:
                                         self.connection.privmsg_many(self.playerjoined, self.m.MSG_BOT_PRIVMSG_TESTSESSIONSTARTED % (self.target))                                                  ## Session started - messaging player
-                                        self.connection.privmsg(self.target, self.m.MSG_BOT_PUBMSG_TESTSESSIONSTARTED % (self.cfg.gameserverIP, self.cfg.gameserverPort, self.cfg.gameserverPass))  ## General message into the channel
+                                        self.connection.privmsg(self.target, self.m.MSG_BOT_PUBMSG_TESTSESSIONSTARTED % (self.cfg.gameserverIP[self.testserver], self.cfg.gameserverPort[self.testserver], self.cfg.gameserverPass[self.testserver]))  ## General message into the channel
                                         self.maxplayercount = 0
+                                        players = []
                                         for v in self.playerjoined:
+                                            players.append(v)
+                                        for v in players:
                                             self.playerjoined.remove(v)
+                                        print self.playerjoined
+                                        print self.maxplayercount
                                     except:
-                                        self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL+"1")
+                                        self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
                             except:
                                 self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
                         else:
                             self.connection.privmsg(nick, self.m.MSG_ERROR_ALREADYINTESTSESSION % (nick))
                     except:
-                        self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL+"2")
+                        self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
                 else:
                     self.connection.privmsg(self.target, self.m.MSG_ERROR_NOTESTSESSION)
             except:
@@ -274,169 +303,229 @@ class MyBot(irclib.SimpleIRCClient):
             except:
                 self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
         ### RCON COMMANDS -> TO SERVER
-        elif message[0] == '!rcon' and len(message) >1:
+        elif message[0] == '!rcon' and len(message) >2:
             try:
                 if self.chanadmins[nick] == '+' or self.chanadmins[nick] == '@' or self.admins[event.source()] == 'admin':
                     try:
-                        command = ""
-                        for i in range(1, len(message)):
-                            try:
-                                if i == len(message):
-                                    command = command + message[i]
-                                else:
-                                    command = command + message[i] + " "
-                            except IndexError:
-                                self.connection.privmsg(self.target, "Array out of range.")
-                        self.rcon.send(command)
-                        self.connection.privmsg(self.target, self.m.MSG_RCON_GENERAL % (nick, message[1], self.cfg.gameserverIP, self.cfg.gameserverPort))
+                        if message[1].isdigit():
+                            servnum = int(message[1])
+                            if (0 <= servnum <= self.servernum):
+                                command = ""
+                                for i in range(2, len(message)):
+                                    try:
+                                        if i == len(message):
+                                            command = command + message[i]
+                                        else:
+                                            command = command + message[i] + " "
+                                    except IndexError:
+                                        self.connection.privmsg(self.target, "Array out of range.")
+                                self.rcon[servnum].send(command)
+                                self.connection.privmsg(self.target, self.m.MSG_RCON_GENERAL % (nick, command, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum]))
+                            else:
+                                self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
+                        else:
+                            self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
+                            
+                    except ValueError:
+                        self.connection.privmsg(self.target, "2nd parameter needs to be an integer between 0 and %s" % (self.servernum))
                     except:
                         self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
             except KeyError:
                 self.connection.privmsg(nick, self.m.MSG_ERROR_PERMISSION_PM)
                 self.connection.privmsg(self.target, self.m.MSG_ERROR_PERMISSION)
-        elif message[0] == '!status':
+        elif message[0] == '!status' and len(message) >1:
             try:
-                response = self.rcon.send_norcon("getstatus")
-                if response:
-                    response = response.splitlines()
-                    response = response[1].split('\\')
-                    modversion = response[response.index("g_modversion")+1]
-                    gametype = response[response.index("g_gametype")+1]
-                    mapname = response[response.index("mapname")+1]
-                            
-                self.connection.privmsg(self.target, self.m.MSG_RCON_STATUS % (self.cfg.gameserverIP, self.cfg.gameserverPort, modversion, gametype, mapname))
-            except:
-                self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
-        elif message[0] == '!playerlist':
-            try:
-                rcon_status = self.rcon.send("status")
-                status_split = rcon_status.splitlines()
-                if len(status_split) > 3:
-                    try:
-                        for x in range(3, len(status_split)): ### range starting at 3, because of the static status lines.
-                            try:
-                                rcon_str = re.compile(r'\s*(\d+)\s+(-?)(\d+)\s+(\d+)\s+(.*)\s+(\d+)\s+(\S*)\s+(\d+)\s+(\d+)')
-                                match = rcon_str.match(status_split[x])
-                                if match:
-                                    try:
-                                        count = x-3
-                                        line = match.groups()
-                                        num, negative, score, ping, name, lastmsg, address, qport, rate = line
-                                        if negative == "-":
-                                            score = "-" + score
-                                        
-                                        name = ''.join(name.split())
-                                        self.player[count] = Player(num, negative, score, ping, name, lastmsg, address, qport, rate)
-                                    except:
-                                        print self.m.MSG_ERROR_GENERAL
-                            except IndexError:
-                                print "Array out of range."
-                            
-                        playerlist = ""
-                        
-                        for i in range(0, len(self.player)):
-                            try:
-                                if i == (len(self.player)-1):
-                                    playerlist = playerlist + self.player[i].getName()
-                                else:
-                                    playerlist = playerlist + self.player[i].getName() + ", "
-                            except IndexError:
-                                self.connection.privmsg(self.target, "Array out of range.")
-                                        
-                        self.connection.privmsg(self.target, self.m.MSG_RCON_PLAYERLIST % (str(count+1), playerlist, self.cfg.gameserverIP, self.cfg.gameserverPort))
-                    except:
-                        self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum): 
+                        response = self.rcon[servnum].send_norcon("getstatus")
+                        if response:
+                            response = response.splitlines()
+                            response = response[1].split('\\')
+                            modversion = response[response.index("g_modversion")+1]
+                            gametype = response[response.index("g_gametype")+1]
+                            mapname = response[response.index("mapname")+1]
+                                
+                        self.connection.privmsg(self.target, self.m.MSG_RCON_STATUS % (self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum], modversion, gametype, mapname))
                 else:
-                    self.connection.privmsg(self.target, self.m.MSG_RCON_PLAYERLIST % ("0", None, self.cfg.gameserverIP, self.cfg.gameserverPort))
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
             except:
                 self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
-        elif message[0] == '!restartserv':
+        elif message[0] == '!playerlist' and len(message) >1:
             try:
-                if self.chanadmins[nick] == '+' or self.chanadmins[nick] == '@' or self.admins[event.source()] == 'admin':
-                    try:
-                        self.rcon.send("quit")
-                        self.connection.privmsg(self.target, self.m.MSG_RCON_RESTARTSERV % (nick, self.cfg.gameserverIP, self.cfg.gameserverPort))
-                    except:
-                        self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum):
+                        rcon_status = self.rcon[servnum].send("status")
+                        status_split = rcon_status.splitlines()
+                        if len(status_split) > 3:
+                            try:
+                                for x in range(3, len(status_split)): ### range starting at 3, because of the static status lines.
+                                    try:
+                                        rcon_str = re.compile(r'\s*(\d+)\s+(-?)(\d+)\s+(\d+)\s+(.*)\s+(\d+)\s+(\S*)\s+(\d+)\s+(\d+)')
+                                        match = rcon_str.match(status_split[x])
+                                        if match:
+                                            try:
+                                                count = x-3
+                                                line = match.groups()
+                                                num, negative, score, ping, name, lastmsg, address, qport, rate = line
+                                                if negative == "-":
+                                                    score = "-" + score
+                                                
+                                                name = ''.join(name.split())
+                                                self.player[count] = Player(num, negative, score, ping, name, lastmsg, address, qport, rate)
+                                            except:
+                                                print self.m.MSG_ERROR_GENERAL
+                                    except IndexError:
+                                        print "Array out of range."
+                                    
+                                playerlist = ""
+                                
+                                for i in range(0, len(self.player)):
+                                    try:
+                                        if i == (len(self.player)-1):
+                                            playerlist = playerlist + self.player[i].getName()
+                                        else:
+                                            playerlist = playerlist + self.player[i].getName() + ", "
+                                    except IndexError:
+                                        self.connection.privmsg(self.target, "Array out of range.")
+                                                
+                                self.connection.privmsg(self.target, self.m.MSG_RCON_PLAYERLIST % (str(count+1), playerlist, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum]))
+                            except:
+                                self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
+                        else:
+                            self.connection.privmsg(self.target, self.m.MSG_RCON_PLAYERLIST % ("0", None, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum]))
+                else:
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
+            except:
+                self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
+        elif message[0] == '!restartserv' and len(message) >1:
+            try:
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum):
+                        if self.chanadmins[nick] == '+' or self.chanadmins[nick] == '@' or self.admins[event.source()] == 'admin':
+                            try:
+                                self.rcon[servnum].send("quit")
+                                self.connection.privmsg(self.target, self.m.MSG_RCON_RESTARTSERV % (nick, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum]))
+                            except:
+                                self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
+                else:
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
             except KeyError:
                 self.connection.privmsg(nick, self.m.MSG_ERROR_PERMISSION_PM)
                 self.connection.privmsg(self.target, self.m.MSG_ERROR_PERMISSION) 
-        elif message[0] == '!kick' and len(message) >1:
+        elif message[0] == '!kick' and len(message) >2:
             try:
-                self.rcon.send("kick " + message[1])
-                self.connection.privmsg(self.target, self.m.MSG_RCON_KICK % (nick, message[1], self.cfg.gameserverIP, self.cfg.gameserverPort)) 
-            except:
-                self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)  
-        elif message[0] == '!map' and len(message) >1:
-            try:
-                mapname_str = re.match(r'ut4_(.*)', message[1], re.M|re.I)
-                if mapname_str:
-                    self.rcon.send("map " + message[1])
-                    self.connection.privmsg(self.target, self.m.MSG_RCON_MAP % (nick, self.cfg.gameserverIP, self.cfg.gameserverPort, message[1])) 
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum):
+                        self.rcon[servnum].send("kick " + message[2])
+                        self.connection.privmsg(self.target, self.m.MSG_RCON_KICK % (nick, message[2], self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum]))
                 else:
-                    self.connection.privmsg(self.target, self.m.MSG_ERROR_MAPNAME % (message[1]))
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum)) 
             except:
                 self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)  
-        elif message[0] == '!mode' and len(message) >1:
+        elif message[0] == '!map' and len(message) >2:
             try:
-                mode_int = int(message[1])
-                try:
-                    self.rcon.send("g_gametype \"" + str(mode_int) + "\"")
-                    self.rcon.send("reload")
-                    self.connection.privmsg(self.target, self.m.MSG_RCON_MODE % (nick, self.cfg.gameserverIP, self.cfg.gameserverPort, str(mode_int)))
-                except:
-                    self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum):
+                        mapname_str = re.match(r'ut4_(.*)', message[2], re.M|re.I)
+                        if mapname_str:
+                            self.rcon[servnum].send("map " + message[2])
+                            self.connection.privmsg(self.target, self.m.MSG_RCON_MAP % (nick, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum], message[1])) 
+                        else:
+                            self.connection.privmsg(self.target, self.m.MSG_ERROR_MAPNAME % (message[2]))
+                else:
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
+            except:
+                self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)  
+        elif message[0] == '!mode' and len(message) >2:
+            try:
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum):
+                        mode_int = int(message[2])
+                        try:
+                            self.rcon[servnum].send("g_gametype \"" + str(mode_int) + "\"")
+                            self.rcon[servnum].send("reload")
+                            self.connection.privmsg(self.target, self.m.MSG_RCON_MODE % (nick, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum], str(mode_int)))
+                        except:
+                            self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
+                else:
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
             except ValueError:
-                self.connection.privmsg(self.target, self.m.MSG_ERROR_GAMETYPE % (message[1]))
-        elif message[0] == '!restart':
+                self.connection.privmsg(self.target, self.m.MSG_ERROR_GAMETYPE % (message[2]))
+        elif message[0] == '!restart' and len(message) >1:
             try:
-                self.rcon.send("restart")
-                self.connection.privmsg(self.target, self.m.MSG_RCON_RESTART % (nick, self.cfg.gameserverIP, self.cfg.gameserverPort))
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum):
+                        self.rcon[servnum].send("restart")
+                        self.connection.privmsg(self.target, self.m.MSG_RCON_RESTART % (nick, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum]))
+                else:
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
             except:
                 self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
-        elif message[0] == '!reload':
+        elif message[0] == '!reload' and len(message) >1:
             try:
-                self.rcon.send("reload")
-                self.connection.privmsg(self.target, self.m.MSG_RCON_RELOAD % (nick, self.cfg.gameserverIP, self.cfg.gameserverPort))
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum):
+                        self.rcon[servnum].send("reload")
+                        self.connection.privmsg(self.target, self.m.MSG_RCON_RELOAD % (nick, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum]))
+                else:
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
             except:
                 self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
-        elif message[0] == '!botenable' and len(message) >1:
+        elif message[0] == '!botenable' and len(message) >2:
             try:
-                if int(message[1]) >= 0 and int(message[1]) <= 1:
-                    try:
-                        if int(message[1]) == 0:
-                            self.rcon.send("bot_enable 0")
-                            self.rcon.send("reload")
-                            self.connection.privmsg(self.target, self.m.MSG_RCON_BOTSDISABLE % (nick, self.cfg.gameserverIP, self.cfg.gameserverPort))
-                        elif int(message[1]) == 1:
-                            self.rcon.send("bot_enable 1")
-                            self.rcon.send("reload")
-                            self.connection.privmsg(self.target, self.m.MSG_RCON_BOTSENABLE % (nick, self.cfg.gameserverIP, self.cfg.gameserverPort))
-                    except ValueError:
-                        self.connection.privmsg(self.target, self.m.MSG_ERROR_BOOLNUMERIC % (message[1]))
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum):
+                        if int(message[2]) >= 0 and int(message[1]) <= 1:
+                            try:
+                                if int(message[2]) == 0:
+                                    self.rcon[servnum].send("bot_enable 0")
+                                    self.rcon[servnum].send("reload")
+                                    self.connection.privmsg(self.target, self.m.MSG_RCON_BOTSDISABLE % (nick, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum]))
+                                elif int(message[2]) == 1:
+                                    self.rcon[servnum].send("bot_enable 1")
+                                    self.rcon[servnum].send("reload")
+                                    self.connection.privmsg(self.target, self.m.MSG_RCON_BOTSENABLE % (nick, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum]))
+                            except ValueError:
+                                self.connection.privmsg(self.target, self.m.MSG_ERROR_BOOLNUMERIC % (message[2]))
+                else:
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
             except:    
                 self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
-        elif message[0] == '!botadd' and len(message) >4:
+        elif message[0] == '!botadd' and len(message) >5:
             try:
-                bot_types = ["boa", "cheetah", "chicken", "cobra", "cockroach", "cougar", "goose", "mantis", "penguin", "puma", "python", "raven", "scarab", "scorpion", "tiger", "widow"]
-                teams = ["blue", "red"]
-                if message[1] in bot_types:
-                    try:
-                        if int(message[2]):
+                if message[1].isdigit():
+                    servnum = int(message[1])
+                    if (0 <= servnum <= self.servernum):
+                        bot_types = ["boa", "cheetah", "chicken", "cobra", "cockroach", "cougar", "goose", "mantis", "penguin", "puma", "python", "raven", "scarab", "scorpion", "tiger", "widow"]
+                        teams = ["blue", "red"]
+                        if message[2] in bot_types:
                             try:
-                                if message[3] in teams:
+                                if int(message[3]):
                                     try:
-                                        if int(message[4]):
-                                            self.rcon.send("addbot %s %s %s %s %s" % (message[1], message[2], message[3], message[4], message[5]))
-                                            self.connection.privmsg(self.target, self.m.MSG_RCON_ADDBOT % (nick, self.cfg.gameserverIP, self.cfg.gameserverPort, message[1], message[2], message[3], message[4], message[5]))
-                                    except ValueError:
-                                        self.connection.privmsg(self.target, self.m.MSG_ERROR_NUMVALUE % (message[4]))
-                            except:
-                                self.connection.privmsg(self.target, self.m.MSG_ERROR_TEAMNAME % (message[3])) 
-                    except ValueError:
-                        self.connection.privmsg(self.target, self.m.MSG_ERROR_NUMVALUE % (message[1])) 
+                                        if message[4] in teams:
+                                            try:
+                                                if int(message[5]):
+                                                    self.rcon[servnum].send("addbot %s %s %s %s %s" % (message[2], message[3], message[4], message[5], message[6]))
+                                                    self.connection.privmsg(self.target, self.m.MSG_RCON_ADDBOT % (nick, self.cfg.gameserverIP[servnum], self.cfg.gameserverPort[servnum], message[2], message[3], message[4], message[5], message[6]))
+                                            except ValueError:
+                                                self.connection.privmsg(self.target, self.m.MSG_ERROR_NUMVALUE % (message[5]))
+                                    except:
+                                        self.connection.privmsg(self.target, self.m.MSG_ERROR_TEAMNAME % (message[4])) 
+                            except ValueError:
+                                self.connection.privmsg(self.target, self.m.MSG_ERROR_NUMVALUE % (message[2])) 
+                        else:
+                            self.connection.privmsg(self.target, self.m.MSG_ERROR_BOTTYPE % (message[2]))
                 else:
-                    self.connection.privmsg(self.target, self.m.MSG_ERROR_BOTTYPE % (message[1]))
+                    self.connection.privmsg(self.target, "Enter a numeric value as second parameter. Between 0 and %s" % (self.servernum))
             except:
                 self.connection.privmsg(self.target, self.m.MSG_ERROR_GENERAL)
             
@@ -465,9 +554,12 @@ def main():
     target = cfg.ircChannel
     targetpass = cfg.ircChannelPass
     
+    
     while True:
         try:
-            r = rcon.rcon(cfg.gameserverIP, int(cfg.gameserverPort), cfg.gameserverRcon)
+            r = []
+            for i in range(0, len(cfg.gameserverIP)):
+                r.append(rcon.rcon(cfg.gameserverIP[i], int(cfg.gameserverPort[i]), cfg.gameserverRcon[i]))
             s = MyBot(target, targetpass, r, cfg)
             print "*** Connecting to %s:%d as %s" % (server, port, nickname)
             s.connect(server, port, nickname)

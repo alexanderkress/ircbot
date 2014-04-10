@@ -8,7 +8,6 @@ import ConfigParser
 import sys
 
 class Config:
-    ownerHostname = None    ### IRC hostname of the bots owner
     adminPassword = None    ### Administrator password for the bot
     modPassword = None      ### Moderator password for the bot
     
@@ -17,11 +16,6 @@ class Config:
     ircChannel = None       ### IRC Channel the bot is going to join
     ircChannelPass = None   ### IRC Channel password
     ircNick = None          ### Nickname the bot is going to have on IRC
-    
-    databaseHost = None     ### Hostname for the database
-    databaseUser = None     ### User for the database
-    databasePass = None     ### Password for the database
-    databaseName = None     ### Name of the database
     
     gameserverIP = None
     gameserverPort = None
@@ -38,11 +32,23 @@ class Config:
             print "An error occurred while reading config file"
             sys.exit(-1)
             
+    def setValue(self, section, option, value):
+        try:
+            self.cfg.set(section, option, value)
+        except ConfigParser.NoSectionError:
+            print 'Cannot find required section'
+            sys.exit(-1)
+        except ConfigParser.NoOptionError:
+            print 'Cannot find required option'
+            sys.exit(-1)
+        except ConfigParser.Error:
+            print 'An error occurred while reading config file'
+            sys.exit(-1)
+            
     def read(self):
         try:
             self._readGeneralSettings()
             self._readIRCServerSettings()
-            #self._readDatabaseSettings()
             self._readGameServerSettings()
         except ConfigParser.NoSectionError:
             print 'Cannot find required section'
@@ -55,7 +61,6 @@ class Config:
             sys.exit(-1)
             
     def _readGeneralSettings(self):
-        #self.ownerHostname = self.cfg.get('general', 'owner')
         self.adminPassword = self.cfg.get('general', 'admin')
         self.modPassword = self.cfg.get('general', 'mod')
         
@@ -66,24 +71,16 @@ class Config:
         self.ircChannel = self.cfg.get('irc', 'channel')
         self.ircChannelPass = self.cfg.get('irc', 'channelpass')
         
-    def _readDatabaseSettings(self):
-        self.databaseHost = self.cfg.get('db', 'host')
-        self.databaseUser = self.cfg.get('db', 'user')
-        self.databasePass = self.cfg.get('db', 'password')
-        self.databaseName = self.cfg.get('db', 'name')
-        
     def _readGameServerSettings(self):
-        self.gameserverIP = self.cfg.get('gameserv', 'gameserverip')
-        self.gameserverPort = self.cfg.get('gameserv', 'gameserverport')
-        self.gameserverPass = self.cfg.get('gameserv', 'gameserverpass')
-        self.gameserverRcon = self.cfg.get('gameserv', 'gameserverrcon')
+        self.gameserverIP = self.cfg.get('gameserv', 'gameserverip').split()
+        self.gameserverPort = self.cfg.get('gameserv', 'gameserverport').split()
+        self.gameserverPass = self.cfg.get('gameserv', 'gameserverpass').split()
+        self.gameserverRcon = self.cfg.get('gameserv', 'gameserverrcon').split()
         
     def printValues(self):
-        print "* [OWNER] Hostname: %s" % self.ownerHostname
         print "* [ADMIN] Password: %s" % self.adminPassword
         print "* [MOD]   Password: %s" % self.modPassword
         print "* [IRC]   Server:   %s:%s - %s" % (self.ircServer, self.ircPort, self.ircNick)
-        print "* [AUTH]  User:     %s, %s" % (self.ircAuthname, self.ircAuthPassword)
-        #print "* [DB]    Server:   %s, %s@%s - %s" % (self.databaseHost, self.databaseUser, self.databasePass, self.databaseName)
-        print "* [GSERV] IP:       %s:%s - RCON: %s" % (self.gameserverIP, self.gameserverPort, self.gameserverRcon)
+        for i in range(0, len(self.gameserverIP)):
+            print "* [GSERV] IP:       %s:%s - PASSWORD: %s - RCON: %s" % (self.gameserverIP[i], self.gameserverPort[i], self.gameserverPass[i], self.gameserverRcon[i])
         
